@@ -1,10 +1,261 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Test</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Superbrain Vision</title>
+    <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body>
-    <h1>HELLO - IF YOU SEE THIS, HTML WORKS</h1>
-    <p>Your browser can load HTML files</p>
+<body class="bg-gradient-to-br from-purple-50 to-blue-50 min-h-screen p-4">
+    
+    <div id="app" class="max-w-4xl mx-auto"></div>
+
+    <script>
+        let apiKey = '';
+        let messages = [];
+        let loading = false;
+        let selectedImage = null;
+
+        function render() {
+            const app = document.getElementById('app');
+            
+            if (!apiKey) {
+                app.innerHTML = `
+                    <div class="min-h-screen flex items-center justify-center">
+                        <div class="bg-white p-8 rounded-xl shadow-2xl max-w-md w-full">
+                            <h1 class="text-3xl font-bold text-center mb-2 bg-gradient-to-r from-purple-600 to-blue-600 bg-clip-text text-transparent">
+                                Superbrain Vision
+                            </h1>
+                            <p class="text-center text-gray-600 mb-6">Llama 4 Scout</p>
+                            
+                            <input 
+                                type="password" 
+                                id="keyInput" 
+                                placeholder="Groq API Key"
+                                class="w-full p-3 border rounded-lg mb-4 focus:ring-2 focus:ring-purple-500 outline-none"
+                            >
+                            
+                            <button 
+                                onclick="setKey()"
+                                class="w-full bg-gradient-to-r from-purple-600 to-blue-600 text-white p-3 rounded-lg font-semibold hover:opacity-90"
+                            >
+                                Start
+                            </button>
+                            
+                            <p class="text-xs text-gray-500 text-center mt-4">
+                                Get key: console.groq.com/keys
+                            </p>
+                        </div>
+                    </div>
+                `;
+                return;
+            }
+
+            let chatHtml = '';
+            
+            if (messages.length === 0) {
+                chatHtml = `
+                    <div class="text-center py-20">
+                        <div class="text-6xl mb-4">🧠</div>
+                        <h2 class="text-2xl font-bold text-gray-700 mb-2">Ready</h2>
+                        <p class="text-gray-500">Upload image and ask questions</p>
+                    </div>
+                `;
+            } else {
+                messages.forEach(msg => {
+                    if (msg.role === 'user') {
+                        chatHtml += `
+                            <div class="flex justify-end mb-4">
+                                <div class="bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-2xl p-4 max-w-[80%]">
+                                    ${msg.image ? `<img src="${msg.image}" class="rounded-lg mb-2 max-h-48">` : ''}
+                                    <p>${msg.text}</p>
+                                </div>
+                            </div>
+                        `;
+                    } else {
+                        chatHtml += `
+                            <div class="flex justify-start mb-4">
+                                <div class="bg-gray-100 text-gray-800 rounded-2xl p-4 max-w-[80%]">
+                                    <p class="whitespace-pre-wrap">${msg.text}</p>
+                                </div>
+                            </div>
+                        `;
+                    }
+                });
+            }
+
+            if (loading) {
+                chatHtml += `
+                    <div class="flex justify-start mb-4">
+                        <div class="bg-gray-100 rounded-2xl p-4">
+                            <div class="flex items-center gap-2">
+                                <div class="w-5 h-5 border-4 border-purple-600 border-t-transparent rounded-full animate-spin"></div>
+                                <span class="text-gray-600">Thinking...</span>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+
+            app.innerHTML = `
+                <div class="bg-white rounded-xl shadow-lg h-screen flex flex-col">
+                    <div class="p-4 border-b flex justify-between items-center">
+                        <h1 class="text-xl font-bold bg-gradient-to-r from-purple-600 to-blue-600 bg-clip-text text-transparent">
+                            Superbrain
+                        </h1>
+                        <button onclick="reset()" class="text-sm text-gray-600 hover:text-gray-800 px-3 py-1 rounded hover:bg-gray-100">
+                            Reset
+                        </button>
+                    </div>
+
+                    <div id="chat" class="flex-1 overflow-y-auto p-4">
+                        ${chatHtml}
+                    </div>
+
+                    <div class="p-4 border-t">
+                        <div id="preview"></div>
+                        <div class="flex gap-2">
+                            <input type="file" id="file" accept="image/*" class="hidden">
+                            <button onclick="document.getElementById('file').click()" class="bg-gray-100 p-3 rounded-lg hover:bg-gray-200">
+                                📷
+                            </button>
+                            <input 
+                                type="text" 
+                                id="msg" 
+                                placeholder="Ask about image..."
+                                class="flex-1 p-3 border rounded-lg focus:ring-2 focus:ring-purple-500 outline-none"
+                                onkeypress="if(event.key==='Enter')send()"
+                            >
+                            <button 
+                                onclick="send()"
+                                class="bg-gradient-to-r from-purple-600 to-blue-600 text-white px-6 py-3 rounded-lg hover:opacity-90"
+                            >
+                                Send
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            setTimeout(() => {
+                const chat = document.getElementById('chat');
+                if (chat) chat.scrollTop = chat.scrollHeight;
+
+                const fileInput = document.getElementById('file');
+                if (fileInput) {
+                    fileInput.onchange = function(e) {
+                        const file = e.target.files[0];
+                        if (file) {
+                            const reader = new FileReader();
+                            reader.onload = function(event) {
+                                selectedImage = event.target.result;
+                                document.getElementById('preview').innerHTML = `
+                                    <div class="mb-2 relative inline-block">
+                                        <img src="${selectedImage}" class="h-20 rounded-lg">
+                                        <button onclick="clearImage()" class="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-6 h-6 hover:bg-red-600">×</button>
+                                    </div>
+                                `;
+                            };
+                            reader.readAsDataURL(file);
+                        }
+                    };
+                }
+            }, 0);
+        }
+
+        function setKey() {
+            const input = document.getElementById('keyInput');
+            if (input && input.value.trim()) {
+                apiKey = input.value.trim();
+                render();
+            }
+        }
+
+        function reset() {
+            if (confirm('Reset and clear chat?')) {
+                apiKey = '';
+                messages = [];
+                selectedImage = null;
+                render();
+            }
+        }
+
+        function clearImage() {
+            selectedImage = null;
+            document.getElementById('file').value = '';
+            document.getElementById('preview').innerHTML = '';
+        }
+
+        async function send() {
+            const input = document.getElementById('msg');
+            const text = input ? input.value.trim() : '';
+            
+            if (!text && !selectedImage) {
+                alert('Type message or upload image');
+                return;
+            }
+
+            const userMsg = text || 'Describe this image';
+            
+            messages.push({
+                role: 'user',
+                text: userMsg,
+                image: selectedImage
+            });
+
+            if (input) input.value = '';
+            loading = true;
+            render();
+
+            try {
+                const content = [{ type: 'text', text: userMsg }];
+                
+                if (selectedImage) {
+                    content.push({
+                        type: 'image_url',
+                        image_url: { url: selectedImage }
+                    });
+                }
+
+                const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${apiKey}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        model: 'meta-llama/llama-4-scout-17b-16e-instruct',
+                        messages: [{ role: 'user', content: content }],
+                        temperature: 0.7,
+                        max_tokens: 2048
+                    })
+                });
+
+                const data = await res.json();
+                
+                if (!res.ok) {
+                    throw new Error(data.error?.message || 'API error');
+                }
+
+                messages.push({
+                    role: 'assistant',
+                    text: data.choices[0].message.content
+                });
+
+                clearImage();
+                
+            } catch (err) {
+                messages.push({
+                    role: 'assistant',
+                    text: `❌ Error: ${err.message}\n\nCheck:\n• API key valid?\n• Image under 20MB?\n• Internet working?`
+                });
+            } finally {
+                loading = false;
+                render();
+            }
+        }
+
+        render();
+    </script>
 </body>
 </html>
