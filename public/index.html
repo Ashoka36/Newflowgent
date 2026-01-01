@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Superbrain - Gemini Vision</title>
+    <title>Superbrain Vision</title>
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-gradient-to-br from-purple-50 to-blue-50 min-h-screen">
@@ -22,9 +22,9 @@
                     <div class="flex items-center justify-center min-h-screen p-4">
                         <div class="bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full">
                             <h1 class="text-3xl font-bold bg-gradient-to-r from-purple-600 to-blue-600 bg-clip-text text-transparent mb-2 text-center">Superbrain</h1>
-                            <p class="text-gray-600 text-center mb-6">Gemini Vision AI</p>
+                            <p class="text-gray-600 text-center mb-6">Vision AI</p>
                             
-                            <input type="password" id="apiKeyInput" placeholder="Enter Gemini API Key" 
+                            <input type="password" id="apiKeyInput" placeholder="Groq API Key" 
                                 class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 mb-4">
                             
                             <button onclick="setApiKey()" 
@@ -32,7 +32,7 @@
                                 Start
                             </button>
                             
-                            <p class="text-xs text-gray-500 text-center mt-4">Get free API key from ai.google.dev</p>
+                            <p class="text-xs text-gray-500 text-center mt-4">console.groq.com/keys</p>
                         </div>
                     </div>
                 `;
@@ -41,8 +41,8 @@
 
             let messagesHtml = messages.length === 0 ? `
                 <div class="text-center text-gray-500 mt-8">
-                    <p class="text-lg">Welcome to Superbrain! 🧠</p>
-                    <p class="mt-2">Upload images and ask questions</p>
+                    <p class="text-lg">🧠 Ready</p>
+                    <p class="mt-2">Upload image or ask question</p>
                 </div>
             ` : '';
 
@@ -73,7 +73,7 @@
                     <div class="bg-white rounded-t-2xl shadow-lg p-4 border-b">
                         <div class="flex justify-between items-center">
                             <h1 class="text-2xl font-bold bg-gradient-to-r from-purple-600 to-blue-600 bg-clip-text text-transparent">Superbrain</h1>
-                            <button onclick="resetApiKey()" class="text-sm text-gray-600 hover:text-gray-800">Change API</button>
+                            <button onclick="resetApiKey()" class="text-sm text-gray-600 hover:text-gray-800">Reset</button>
                         </div>
                     </div>
 
@@ -89,7 +89,7 @@
                                 class="bg-gray-100 p-3 rounded-lg hover:bg-gray-200">
                                 📷
                             </button>
-                            <input type="text" id="messageInput" placeholder="Ask about the image or upload one..." 
+                            <input type="text" id="messageInput" placeholder="Message..." 
                                 class="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
                                 onkeypress="if(event.key==='Enter') sendMessage()">
                             <button onclick="sendMessage()" 
@@ -129,7 +129,7 @@
                     const reader = new FileReader();
                     reader.onload = function(event) {
                         imagePreview = event.target.result;
-                        selectedImage = imagePreview.split(',')[1];
+                        selectedImage = event.target.result;
                         
                         const preview = document.getElementById('imagePreviewContainer');
                         preview.innerHTML = `
@@ -172,38 +172,41 @@
             render();
 
             try {
-                const parts = [];
+                const content = [
+                    { type: "text", text: userMessage }
+                ];
                 
                 if (selectedImage) {
-                    parts.push({
-                        inline_data: {
-                            mime_type: "image/jpeg",
-                            data: selectedImage
-                        }
+                    content.push({
+                        type: "image_url",
+                        image_url: { url: selectedImage }
                     });
                 }
-                
-                parts.push({ text: userMessage });
 
-                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
+                const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
                     method: 'POST',
                     headers: {
+                        'Authorization': `Bearer ${apiKey}`,
                         'Content-Type': 'application/json'
                     },
                     body: JSON.stringify({
-                        contents: [{
-                            parts: parts
-                        }]
+                        model: 'llama-3.2-11b-vision-preview',
+                        messages: [{
+                            role: 'user',
+                            content: content
+                        }],
+                        temperature: 0.7,
+                        max_tokens: 2048
                     })
                 });
 
                 const data = await response.json();
                 
                 if (!response.ok) {
-                    throw new Error(data.error?.message || `API Error: ${response.status}`);
+                    throw new Error(data.error?.message || JSON.stringify(data));
                 }
 
-                const assistantText = data.candidates[0].content.parts[0].text;
+                const assistantText = data.choices[0].message.content;
                 
                 messages.push({
                     role: 'assistant',
@@ -214,7 +217,7 @@
             } catch (error) {
                 messages.push({
                     role: 'assistant',
-                    text: `Error: ${error.message}\n\nMake sure:\n- Your API key is valid\n- You have Gemini API access at ai.google.dev\n- Your API key supports vision models`
+                    text: `Error: ${error.message}`
                 });
             } finally {
                 isLoading = false;
