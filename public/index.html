@@ -18,12 +18,6 @@
             -webkit-font-smoothing: antialiased;
             -moz-osx-font-smoothing: grayscale;
         }
-        @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
-        .animate-spin {
-            animation: spin 1s linear infinite;
-        }
     </style>
 </head>
 <body>
@@ -33,7 +27,7 @@
         const { useState, useRef, useEffect } = React;
 
         const Brain = ({ className }) => (
-            <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+            <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
             </svg>
         );
@@ -109,29 +103,27 @@ Remember: You are a THINKING layer between intent and execution. You plan, you d
             const [messages, setMessages] = useState([
                 {
                     role: 'assistant',
-                    content: '👋 Hi! I\'m Superbrain - your automation planning assistant.\n\nDescribe what you want to automate, and I\'ll design a detailed workflow plan for you.\n\nYou can optionally attach an image for context (like a flowchart or screenshot).'
+                    content: '👋 Hi! I\'m Superbrain - your automation planning assistant.\n\nDescribe what you want to automate, and I\'ll design a detailed workflow plan for you.\n\n📷 You can attach an image for context - it will be analyzed by your Vision API.'
                 }
             ]);
             const [input, setInput] = useState('');
             const [image, setImage] = useState(null);
             const [imagePreview, setImagePreview] = useState(null);
             const [isLoading, setIsLoading] = useState(false);
-            const [apiKey, setApiKey] = useState('');
-            const [apiProvider, setApiProvider] = useState('groq');
+            const [groqKey, setGroqKey] = useState('');
+            const [visionKey, setVisionKey] = useState('');
             const [showApiInput, setShowApiInput] = useState(true);
             const [showSettings, setShowSettings] = useState(false);
             const messagesEndRef = useRef(null);
             const fileInputRef = useRef(null);
 
             useEffect(() => {
-                const savedKey = localStorage.getItem('api_key');
-                const savedProvider = localStorage.getItem('api_provider');
-                if (savedKey) {
-                    setApiKey(savedKey);
+                const savedGroqKey = localStorage.getItem('groq_api_key');
+                const savedVisionKey = localStorage.getItem('vision_api_key');
+                if (savedGroqKey && savedVisionKey) {
+                    setGroqKey(savedGroqKey);
+                    setVisionKey(savedVisionKey);
                     setShowApiInput(false);
-                }
-                if (savedProvider) {
-                    setApiProvider(savedProvider);
                 }
             }, []);
 
@@ -163,34 +155,37 @@ Remember: You are a THINKING layer between intent and execution. You plan, you d
                 }
             };
 
-            const saveApiKey = () => {
-                if (apiKey.trim()) {
-                    localStorage.setItem('api_key', apiKey.trim());
-                    localStorage.setItem('api_provider', apiProvider);
+            const saveApiKeys = () => {
+                if (groqKey.trim() && visionKey.trim()) {
+                    localStorage.setItem('groq_api_key', groqKey.trim());
+                    localStorage.setItem('vision_api_key', visionKey.trim());
                     setShowApiInput(false);
                     setShowSettings(false);
+                } else {
+                    alert('Please enter both Groq API key and Vision API key');
                 }
             };
 
-            const clearApiKey = () => {
-                localStorage.removeItem('api_key');
-                localStorage.removeItem('api_provider');
-                setApiKey('');
-                setApiProvider('groq');
+            const clearApiKeys = () => {
+                localStorage.removeItem('groq_api_key');
+                localStorage.removeItem('vision_api_key');
+                setGroqKey('');
+                setVisionKey('');
                 setShowApiInput(true);
                 setShowSettings(false);
                 setMessages([
                     {
                         role: 'assistant',
-                        content: '👋 Hi! I\'m Superbrain - your automation planning assistant.\n\nDescribe what you want to automate, and I\'ll design a detailed workflow plan for you.\n\nYou can optionally attach an image for context (like a flowchart or screenshot).'
+                        content: '👋 Hi! I\'m Superbrain - your automation planning assistant.\n\nDescribe what you want to automate, and I\'ll design a detailed workflow plan for you.\n\n📷 You can attach an image for context - it will be analyzed by your Vision API.'
                     }
                 ]);
             };
 
             const sendMessage = async () => {
                 if ((!input.trim() && !image) || isLoading) return;
-                if (!apiKey.trim()) {
-                    alert('Please enter your API key first');
+                if (!groqKey.trim() || !visionKey.trim()) {
+                    alert('Please enter both API keys in settings');
+                    setShowSettings(true);
                     return;
                 }
 
@@ -201,152 +196,156 @@ Remember: You are a THINKING layer between intent and execution. You plan, you d
                 };
 
                 setMessages(prev => [...prev, userMessage]);
+                const userInput = input.trim();
                 setInput('');
                 setIsLoading(true);
 
                 try {
-                    let apiUrl, model, headers, body;
+                    let finalResponse = '';
 
-                    const conversationHistory = messages
-                        .filter(m => m.role !== 'assistant' || !m.content.includes('Hi! I\'m Superbrain'))
-                        .map(m => ({
-                            role: m.role,
-                            content: m.content
-                        }));
+                    // STEP 1: If image exists, analyze it with Vision API FIRST
+                    if (image) {
+                        setMessages(prev => [...prev, {
+                            role: 'assistant',
+                            content: '🔍 Analyzing image with Vision API...'
+                        }]);
 
-                    if (apiProvider === 'groq') {
-                        apiUrl = 'https://api.groq.com/openai/v1/chat/completions';
+                        const base64Image = image.split(',')[1];
                         
-                        if (image) {
-                            model = 'llama-3.2-90b-vision-preview';
-                            
-                            const userContent = [
-                                {
-                                    type: 'text',
-                                    text: input.trim() || 'Analyze this image'
-                                },
-                                {
-                                    type: 'image_url',
-                                    image_url: { url: image }
-                                }
-                            ];
+                        const visionResponse = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=' + visionKey, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                            },
+                            body: JSON.stringify({
+                                contents: [{
+                                    parts: [
+                                        {
+                                            text: "Describe this image in detail. Focus on any workflows, diagrams, processes, or automation concepts shown. Be specific and technical."
+                                        },
+                                        {
+                                            inline_data: {
+                                                mime_type: "image/jpeg",
+                                                data: base64Image
+                                            }
+                                        }
+                                    ]
+                                }]
+                            })
+                        });
 
-                            body = {
-                                model,
+                        if (!visionResponse.ok) {
+                            const error = await visionResponse.json();
+                            throw new Error('Vision API error: ' + (error.error?.message || 'Failed to analyze image'));
+                        }
+
+                        const visionData = await visionResponse.json();
+                        const imageAnalysis = visionData.candidates[0].content.parts[0].text;
+
+                        // Remove the "analyzing" message
+                        setMessages(prev => prev.slice(0, -1));
+
+                        // STEP 2: Now send image analysis + user input to Groq for workflow planning
+                        const combinedPrompt = userInput 
+                            ? `User Request: ${userInput}\n\nImage Analysis: ${imageAnalysis}\n\nCreate a detailed automation workflow plan based on both the user's request and the image analysis.`
+                            : `Based on this image analysis, create a detailed automation workflow plan:\n\n${imageAnalysis}`;
+
+                        const conversationHistory = messages
+                            .filter(m => m.role !== 'assistant' || !m.content.includes('Hi! I\'m Superbrain'))
+                            .map(m => ({
+                                role: m.role,
+                                content: m.content
+                            }));
+
+                        const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+                            method: 'POST',
+                            headers: {
+                                'Authorization': `Bearer ${groqKey}`,
+                                'Content-Type': 'application/json',
+                            },
+                            body: JSON.stringify({
+                                model: 'llama-3.3-70b-versatile',
                                 messages: [
+                                    {
+                                        role: 'system',
+                                        content: SYSTEM_PROMPT
+                                    },
                                     ...conversationHistory,
-                                    { 
-                                        role: 'user', 
-                                        content: userContent 
+                                    {
+                                        role: 'user',
+                                        content: combinedPrompt
                                     }
                                 ],
                                 temperature: 0.3,
                                 max_tokens: 2048,
                                 top_p: 0.9
-                            };
-                        } else {
-                            model = 'llama-3.3-70b-versatile';
-                            body = {
-                                model,
+                            })
+                        });
+
+                        if (!groqResponse.ok) {
+                            const error = await groqResponse.json();
+                            throw new Error('Groq API error: ' + (error.error?.message || 'Failed to generate workflow'));
+                        }
+
+                        const groqData = await groqResponse.json();
+                        finalResponse = groqData.choices[0].message.content;
+
+                    } else {
+                        // NO IMAGE: Use Groq directly for text-only workflow planning
+                        const conversationHistory = messages
+                            .filter(m => m.role !== 'assistant' || !m.content.includes('Hi! I\'m Superbrain'))
+                            .map(m => ({
+                                role: m.role,
+                                content: m.content
+                            }));
+
+                        const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+                            method: 'POST',
+                            headers: {
+                                'Authorization': `Bearer ${groqKey}`,
+                                'Content-Type': 'application/json',
+                            },
+                            body: JSON.stringify({
+                                model: 'llama-3.3-70b-versatile',
                                 messages: [
-                                    { role: 'system', content: SYSTEM_PROMPT },
+                                    {
+                                        role: 'system',
+                                        content: SYSTEM_PROMPT
+                                    },
                                     ...conversationHistory,
-                                    { role: 'user', content: input.trim() }
+                                    {
+                                        role: 'user',
+                                        content: userInput
+                                    }
                                 ],
                                 temperature: 0.3,
                                 max_tokens: 2048,
                                 top_p: 0.9
-                            };
+                            })
+                        });
+
+                        if (!groqResponse.ok) {
+                            const error = await groqResponse.json();
+                            throw new Error('Groq API error: ' + (error.error?.message || 'Failed to generate workflow'));
                         }
 
-                        headers = {
-                            'Authorization': `Bearer ${apiKey}`,
-                            'Content-Type': 'application/json'
-                        };
-                    } else {
-                        apiUrl = 'https://api.llama-api.com/chat/completions';
-                        
-                        if (image) {
-                            const userContent = [
-                                {
-                                    type: 'text',
-                                    text: input.trim() || 'Analyze this image'
-                                },
-                                {
-                                    type: 'image_url',
-                                    image_url: { url: image }
-                                }
-                            ];
-
-                            body = {
-                                model: 'llama3.2-90b-vision',
-                                messages: [
-                                    { role: 'system', content: SYSTEM_PROMPT },
-                                    ...conversationHistory,
-                                    { role: 'user', content: userContent }
-                                ],
-                                temperature: 0.3,
-                                max_tokens: 2048
-                            };
-                        } else {
-                            body = {
-                                model: 'llama3.1-70b',
-                                messages: [
-                                    { role: 'system', content: SYSTEM_PROMPT },
-                                    ...conversationHistory,
-                                    { role: 'user', content: input.trim() }
-                                ],
-                                temperature: 0.3,
-                                max_tokens: 2048
-                            };
-                        }
-
-                        headers = {
-                            'Authorization': `Bearer ${apiKey}`,
-                            'Content-Type': 'application/json'
-                        };
+                        const groqData = await groqResponse.json();
+                        finalResponse = groqData.choices[0].message.content;
                     }
 
-                    const response = await fetch(apiUrl, {
-                        method: 'POST',
-                        headers,
-                        body: JSON.stringify(body)
-                    });
-
-                    if (!response.ok) {
-                        const error = await response.json();
-                        throw new Error(error.error?.message || error.message || 'API request failed');
-                    }
-
-                    const data = await response.json();
                     const assistantMessage = {
                         role: 'assistant',
-                        content: data.choices[0].message.content
+                        content: finalResponse
                     };
 
                     setMessages(prev => [...prev, assistantMessage]);
                     removeImage();
+
                 } catch (error) {
                     console.error('Error:', error);
-                    let errorMsg = `⚠️ Error: ${error.message}\n\n`;
-                    
-                    if (error.message.includes('vision') || error.message.includes('image')) {
-                        errorMsg += 'Vision support issue detected. Try:\n';
-                        errorMsg += '1. Use Groq API (supports llama-3.2-90b-vision-preview)\n';
-                        errorMsg += '2. Or use Llama API with llama3.2-90b-vision\n';
-                        errorMsg += '3. Check that your image is under 4MB for base64\n';
-                        errorMsg += '4. Or send text-only messages\n\n';
-                    }
-                    
-                    if (error.message.includes('401') || error.message.includes('authentication')) {
-                        errorMsg += 'Authentication failed. Please check your API key.';
-                    } else {
-                        errorMsg += 'Please check your API key and internet connection.';
-                    }
-                    
                     setMessages(prev => [...prev, {
                         role: 'assistant',
-                        content: errorMsg
+                        content: `⚠️ Error: ${error.message}\n\nPlease check:\n1. Your Vision API key (for image analysis)\n2. Your Groq API key (for workflow planning)\n3. Try again or check settings ⚙️`
                     }]);
                 } finally {
                     setIsLoading(false);
@@ -368,52 +367,59 @@ Remember: You are a THINKING layer between intent and execution. You plan, you d
                                 <Brain className="w-12 h-12 text-purple-400 mr-3" />
                                 <h1 className="text-3xl font-bold text-white">Superbrain</h1>
                             </div>
-                            <p className="text-slate-300 mb-4 text-center">
-                                Enter your API key to start planning automations
+                            <p className="text-slate-300 mb-6 text-center">
+                                Enter your API keys to start planning automations
                             </p>
                             
-                            <div className="mb-4">
-                                <label className="text-slate-300 text-sm mb-2 block">Select API Provider</label>
-                                <select
-                                    value={apiProvider}
-                                    onChange={(e) => setApiProvider(e.target.value)}
-                                    className="w-full px-4 py-3 bg-slate-700 border border-slate-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
-                                >
-                                    <option value="groq">Groq (Free - Recommended)</option>
-                                    <option value="llama">Llama API</option>
-                                </select>
-                                <p className="text-xs text-slate-400 mt-2">
-                                    {apiProvider === 'groq' ? (
-                                        <>✨ Groq: llama-3.2-90b-vision-preview for images</>
-                                    ) : (
-                                        <>✨ Llama API: llama3.2-90b-vision for images</>
-                                    )}
-                                </p>
+                            <div className="space-y-4">
+                                <div>
+                                    <label className="text-slate-300 text-sm mb-2 block font-semibold">
+                                        🚀 Groq API Key (for workflow planning)
+                                    </label>
+                                    <input
+                                        type="password"
+                                        value={groqKey}
+                                        onChange={(e) => setGroqKey(e.target.value)}
+                                        placeholder="gsk_..."
+                                        className="w-full px-4 py-3 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                                    />
+                                    <p className="text-xs text-slate-400 mt-1">
+                                        Get free at <span className="text-purple-400">console.groq.com</span>
+                                    </p>
+                                </div>
+
+                                <div>
+                                    <label className="text-slate-300 text-sm mb-2 block font-semibold">
+                                        📷 Vision API Key (for image analysis)
+                                    </label>
+                                    <input
+                                        type="password"
+                                        value={visionKey}
+                                        onChange={(e) => setVisionKey(e.target.value)}
+                                        placeholder="AIza... (Gemini) or any vision API key"
+                                        className="w-full px-4 py-3 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                                    />
+                                    <p className="text-xs text-slate-400 mt-1">
+                                        Gemini Pro: <span className="text-purple-400">aistudio.google.com</span>
+                                    </p>
+                                </div>
                             </div>
 
-                            <input
-                                type="password"
-                                value={apiKey}
-                                onChange={(e) => setApiKey(e.target.value)}
-                                placeholder={apiProvider === 'groq' ? 'gsk_...' : 'LL-...'}
-                                className="w-full px-4 py-3 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-purple-500 mb-4"
-                                onKeyPress={(e) => e.key === 'Enter' && apiKey.trim() && saveApiKey()}
-                            />
                             <button
-                                onClick={saveApiKey}
-                                disabled={!apiKey.trim()}
-                                className="w-full bg-purple-600 text-white py-3 rounded-lg font-semibold hover:bg-purple-700 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
+                                onClick={saveApiKeys}
+                                disabled={!groqKey.trim() || !visionKey.trim()}
+                                className="w-full mt-6 bg-purple-600 text-white py-3 rounded-lg font-semibold hover:bg-purple-700 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
                             >
                                 <Zap className="w-5 h-5 mr-2" />
                                 Start Planning
                             </button>
-                            <div className="text-xs text-slate-400 mt-4 space-y-1">
-                                <p className="text-center">
-                                    {apiProvider === 'groq' ? (
-                                        <>Get your free key at <span className="text-purple-400">console.groq.com</span></>
-                                    ) : (
-                                        <>Get your key at <span className="text-purple-400">llama-api.com</span></>
-                                    )}
+
+                            <div className="mt-4 p-3 bg-slate-700 rounded-lg">
+                                <p className="text-xs text-slate-300 font-semibold mb-1">How it works:</p>
+                                <p className="text-xs text-slate-400">
+                                    • Vision API analyzes your images<br/>
+                                    • Groq creates automation workflows<br/>
+                                    • Both stored securely in your browser
                                 </p>
                             </div>
                         </div>
@@ -428,16 +434,17 @@ Remember: You are a THINKING layer between intent and execution. You plan, you d
                             <Brain className="w-8 h-8 text-purple-400 mr-3" />
                             <div>
                                 <h1 className="text-xl font-bold text-white">Superbrain</h1>
-                                <p className="text-xs text-slate-400">Automation Planning Engine</p>
+                                <p className="text-xs text-slate-400">Vision → Groq → Workflow</p>
                             </div>
                         </div>
                         <div className="flex items-center space-x-3">
                             <div className="text-xs text-slate-400 bg-slate-700 px-3 py-1 rounded-full">
-                                {apiProvider === 'groq' ? 'Groq' : 'Llama'} API
+                                Planning Mode
                             </div>
                             <button
                                 onClick={() => setShowSettings(!showSettings)}
                                 className="text-slate-400 hover:text-white transition"
+                                title="Settings"
                             >
                                 <Settings className="w-6 h-6" />
                             </button>
@@ -447,45 +454,50 @@ Remember: You are a THINKING layer between intent and execution. You plan, you d
                     {showSettings && (
                         <div className="bg-slate-700 border-b border-slate-600 px-6 py-4">
                             <div className="max-w-4xl mx-auto">
-                                <h3 className="text-white font-semibold mb-3">Settings</h3>
-                                <div className="mb-3">
-                                    <label className="text-slate-300 text-sm mb-2 block">API Provider</label>
-                                    <select
-                                        value={apiProvider}
-                                        onChange={(e) => {
-                                            setApiProvider(e.target.value);
-                                            localStorage.setItem('api_provider', e.target.value);
-                                        }}
-                                        className="w-full px-4 py-2 bg-slate-600 border border-slate-500 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-purple-500 text-sm"
-                                    >
-                                        <option value="groq">Groq (Free - Recommended)</option>
-                                        <option value="llama">Llama API</option>
-                                    </select>
-                                    <p className="text-xs text-slate-400 mt-2">
-                                        Vision model: {apiProvider === 'groq' ? 'llama-3.2-90b-vision-preview' : 'llama3.2-90b-vision'}
-                                    </p>
+                                <h3 className="text-white font-semibold mb-3">⚙️ API Settings</h3>
+                                
+                                <div className="space-y-3">
+                                    <div>
+                                        <label className="text-slate-300 text-sm mb-1 block">🚀 Groq API Key</label>
+                                        <input
+                                            type="password"
+                                            value={groqKey}
+                                            onChange={(e) => setGroqKey(e.target.value)}
+                                            placeholder="gsk_..."
+                                            className="w-full px-4 py-2 bg-slate-600 border border-slate-500 rounded-lg text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-purple-500 text-sm"
+                                        />
+                                    </div>
+
+                                    <div>
+                                        <label className="text-slate-300 text-sm mb-1 block">📷 Vision API Key (Gemini or any)</label>
+                                        <input
+                                            type="password"
+                                            value={visionKey}
+                                            onChange={(e) => setVisionKey(e.target.value)}
+                                            placeholder="AIza... or your vision API key"
+                                            className="w-full px-4 py-2 bg-slate-600 border border-slate-500 rounded-lg text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-purple-500 text-sm"
+                                        />
+                                    </div>
                                 </div>
-                                <div className="flex items-center space-x-3">
-                                    <input
-                                        type="password"
-                                        value={apiKey}
-                                        onChange={(e) => setApiKey(e.target.value)}
-                                        placeholder="Update API key..."
-                                        className="flex-1 px-4 py-2 bg-slate-600 border border-slate-500 rounded-lg text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-purple-500 text-sm"
-                                    />
+
+                                <div className="flex items-center space-x-3 mt-4">
                                     <button
-                                        onClick={saveApiKey}
+                                        onClick={saveApiKeys}
                                         className="bg-purple-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-purple-700 transition"
                                     >
-                                        Save
+                                        Save Keys
                                     </button>
                                     <button
-                                        onClick={clearApiKey}
+                                        onClick={clearApiKeys}
                                         className="bg-red-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-red-700 transition"
                                     >
-                                        Clear
+                                        Clear All
                                     </button>
                                 </div>
+
+                                <p className="text-xs text-slate-400 mt-3">
+                                    Pipeline: Vision API → Image Analysis → Groq → Workflow Plan
+                                </p>
                             </div>
                         </div>
                     )}
@@ -520,7 +532,7 @@ Remember: You are a THINKING layer between intent and execution. You plan, you d
                             <div className="flex justify-start">
                                 <div className="bg-slate-800 text-slate-100 rounded-lg px-4 py-3 border border-slate-700 flex items-center">
                                     <Loader2 className="w-5 h-5 animate-spin mr-2 text-purple-400" />
-                                    <span className="text-sm">Designing automation plan...</span>
+                                    <span className="text-sm">Processing with Vision + Groq...</span>
                                 </div>
                             </div>
                         )}
@@ -531,6 +543,7 @@ Remember: You are a THINKING layer between intent and execution. You plan, you d
                         <div className="px-4 pb-2">
                             <div className="bg-slate-800 rounded-lg p-2 inline-flex items-center border border-purple-500">
                                 <img src={imagePreview} alt="Preview" className="h-16 rounded" />
+                                <span className="text-xs text-slate-300 mx-2">Will be analyzed by Vision API</span>
                                 <button
                                     onClick={removeImage}
                                     className="ml-2 text-slate-400 hover:text-white"
@@ -553,7 +566,7 @@ Remember: You are a THINKING layer between intent and execution. You plan, you d
                             <button
                                 onClick={() => fileInputRef.current?.click()}
                                 className="bg-slate-700 text-slate-300 p-3 rounded-lg hover:bg-slate-600 transition"
-                                title="Attach image (optional)"
+                                title="Attach image - will be analyzed by Vision API"
                             >
                                 <ImagePlus className="w-5 h-5" />
                             </button>
@@ -570,16 +583,29 @@ Remember: You are a THINKING layer between intent and execution. You plan, you d
                                 disabled={(!input.trim() && !image) || isLoading}
                                 className="bg-purple-600 text-white p-3 rounded-lg hover:bg-purple-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
                             >
-                                <Send className="w-5 h-5" />
+                                {isLoading ? (
+                                    <Loader2 className="w-5 h-5 animate-spin" />
+                                ) : (
+                                    <Send className="w-5 h-5" />
+                                )}
                             </button>
                         </div>
+                        <p className="text-xs text-slate-500 mt-2 text-center">
+                            📷 Images → Vision API | 🚀 Workflows → Groq
+                        </p>
                     </div>
                 </div>
             );
         }
 
-        const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(<SuperbrainPlanner />);
+        ReactDOM.render(<SuperbrainPlanner />, document.getElementById('root'));
     </script>
 </body>
 </html>
+
+---------- Forwarded message ---------
+From: Ashok K <ashok.kb11@gmail.com>
+Date: Thu, 1 Jan, 2026, 5:31 pm
+Subject: Latest index html for vision api for super brain
+To: Ashok K <ashok.kb11@gmail.com>
+
